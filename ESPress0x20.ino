@@ -189,6 +189,9 @@ display(void *parameter) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
+    // Make the transition less abrupt
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
     // Real display loop
     for (;;) {
         int           pos_y = 32;
