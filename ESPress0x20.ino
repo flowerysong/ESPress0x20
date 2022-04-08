@@ -127,7 +127,6 @@ read_sensors(void *parameter) {
             temp_sorted[ 0 ] += temp_sorted[ i ];
         }
         boiler_temp = temp_sorted[ 0 ] / (temp_samples - 2);
-        Serial.printf("Current temp: %f\n", boiler_temp);
 
         // Sleep
         vTaskDelay(pdMS_TO_TICKS(SENSOR_READ_TIME));
