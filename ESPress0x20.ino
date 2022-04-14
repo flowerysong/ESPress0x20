@@ -20,6 +20,8 @@
 #define PIN_RELAY_BOILER 23
 #define PIN_SWITCH_BREW 22
 #define PIN_SWITCH_STEAM 21
+#define PIN_DIMMER_ZC 18
+#define PIN_DIMMER_PSM 19
 
 #define PID_WINDOW 1000
 #define PID_KP_HEAT 3
@@ -314,6 +316,9 @@ setup() {
     boiler_pid.SetMode(boiler_pid.Control::automatic);
     boiler_window = millis();
 
+    pinMode(PIN_DIMMER_ZC, INPUT_PULLUP);
+    pinMode(PIN_DIMMER_PSM, OUTPUT);
+
     xTaskCreate(read_sensors, "Read Sensors", 2048, NULL, 2, NULL);
 }
 
@@ -342,7 +347,12 @@ loop() {
         if (new_state == MACHINE_BREWING) {
             boiler_pid.SetTunings(PID_KP_BREW, PID_KI_BREW, PID_KD_BREW);
             brew_start = now;
-        } else if (new_state == MACHINE_HEATING) {
+            digitalWrite(PIN_DIMMER_PSM, HIGH);
+        } else {
+            digitalWrite(PIN_DIMMER_PSM, LOW);
+        }
+
+        if (new_state == MACHINE_HEATING) {
             boiler_pid.SetTunings(PID_KP_HEAT, PID_KI_HEAT, PID_KD_HEAT);
         }
 
