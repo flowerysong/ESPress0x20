@@ -1,7 +1,7 @@
 # ESPress0x20
 
 ESPress0x20 is an ESP32-based controller for my Gaggia Classic Pro. It
-might even work.
+even mostly works.
 
 ## Why is it called that?
 
