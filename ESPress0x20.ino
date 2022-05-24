@@ -360,7 +360,7 @@ setup() {
 
 void
 loop() {
-    const int    cycle_samples = 10;
+    const int    cycle_samples = 5;
     static float cycle_total = 0.0;
     static float cycle_data[ cycle_samples ] = {};
     static int   cycle_idx = 0;
