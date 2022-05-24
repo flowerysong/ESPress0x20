@@ -1,9 +1,14 @@
 <https://www.waveshare.com/wiki/3.5inch_RPi_LCD_(B)>
 
+```
 3.5inch RPi LCD (B)
 WaveShare
 SpotPear
 Rev2.0
+```
+
+Pinout:
+```
              25 26
              23 24
              21 22
@@ -17,7 +22,6 @@ Rev2.0
               5 6
               3 4
               1 2
-
 
 1` 	3.3V 	Power (3.3V input)
 2 	5V 	Power (5V input)
@@ -45,7 +49,10 @@ Rev2.0
 24 	LCD_CS 	LCD chip select signal, low level selects LCD
 25 	GND 	Ground
 26 	TP_CS 	Touch panel chip select signal, low level selects touch panel
+```
 
+ESP32 connections:
+```
 1  <-> 3V3
 2  <-> 5V
 6  <-> GND
@@ -56,3 +63,4 @@ Rev2.0
 23 <-> P14
 24 <-> P15
 26 <-> P26
+```
