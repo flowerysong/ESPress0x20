@@ -12,6 +12,7 @@
 #include <WiFi.h>
 #include <max6675.h>
 
+#include "PID_Tuner.h"
 #include "SpriteButton.h"
 
 #define PIN_THERMO_CLK 5
@@ -24,12 +25,9 @@
 #define PIN_DIMMER_PSM 19
 
 #define PID_WINDOW 1000
-#define PID_KP_HEAT 4
-#define PID_KI_HEAT 1
-#define PID_KD_HEAT 0.22
-#define PID_KP_BREW 3
-#define PID_KI_BREW 40
-#define PID_KD_BREW 10
+#define PID_KP_HEAT 2.0
+#define PID_KI_HEAT 0.1
+#define PID_KD_HEAT 0
 #define SENSOR_READ_TIME 500
 
 enum machine_state {
@@ -48,35 +46,62 @@ TFT_eSprite sprite = TFT_eSprite(&tft);
 
 machine_state current_state = MACHINE_INIT;
 unsigned long last_state_change = 0;
+float         boiler_temp_raw;
 float         boiler_temp;
+bool          boiler_stable;
 float         boiler_control;
 unsigned long boiler_window;
-bool          boiler_on = false;
 int           duty_cycle = 0;
 float         setpoint_brew;
 float         setpoint_steam;
 float         brew_offset = 14.5;
+bool          debug = false;
 unsigned long brew_start;
 unsigned long brew_end;
 MAX6675       boiler_thermo(PIN_THERMO_CLK, PIN_THERMO_CS, PIN_THERMO_DO);
 QuickPID      boiler_pid(&boiler_temp, &boiler_control, &setpoint_brew);
+bool          autotuned = true;
+PID_Tuner     pid_tuner(&boiler_temp, &boiler_control);
 
 /* Utility functions */
 
 void
-boiler_state(bool s) {
-    if (s) {
+boiler_pwm(void) {
+    unsigned long now;
+    const int     cycle_samples = 5;
+    static float  cycle_total = 0.0;
+    static float  cycle_data[ cycle_samples ] = {};
+    static int    cycle_idx = 0;
+
+    now = millis();
+
+    if (boiler_control > 1000) {
+        boiler_control = 1000;
+    } else if (boiler_control < 0) {
+        boiler_control = 0;
+    }
+
+    if (boiler_temp_raw > 310) {
+        // E stop
+        boiler_control = 0;
+    }
+
+    if (boiler_control >= now - boiler_window) {
         digitalWrite(PIN_RELAY_BOILER, HIGH);
-        if (!boiler_on) {
-            Serial.println("Boiler on");
-        }
-        boiler_on = true;
     } else {
         digitalWrite(PIN_RELAY_BOILER, LOW);
-        if (boiler_on) {
-            Serial.println("Boiler off");
+    }
+
+    // Calculate duty cycle for display
+    if (now - boiler_window > PID_WINDOW) {
+        boiler_window += PID_WINDOW;
+        cycle_total -= cycle_data[ cycle_idx ];
+        cycle_data[ cycle_idx ] = boiler_control;
+        cycle_total += boiler_control;
+        duty_cycle = cycle_total / 10 / cycle_samples;
+        if (++cycle_idx >= cycle_samples) {
+            cycle_idx = 0;
         }
-        boiler_on = false;
     }
 }
 
@@ -122,35 +147,29 @@ pref_or_def(const char *pref, float def) {
 
 void
 read_sensors(void *parameter) {
-    const int temp_samples = 5;
-    float     temp_readings[ temp_samples ];
-    float     temp_sorted[ temp_samples ];
-    int       temp_idx = 0;
+    const float  temp_alpha = 0.1;
+    static float temp_reading;
+    static float temp_slope;
 
-    for (int i = 0; i < temp_samples; i++) {
-        temp_readings[ i ] = boiler_thermo.readFahrenheit();
-    }
+    // Initial value
+    temp_reading = boiler_thermo.readFahrenheit();
+    temp_slope = temp_reading;
 
+    // Read loop
     for (;;) {
-        // Read temperature
-        if (++temp_idx >= temp_samples) {
-            temp_idx = 0;
+        boiler_temp_raw = boiler_thermo.readFahrenheit();
+        // Double exponential moving average
+        temp_reading = (temp_alpha * boiler_temp_raw) +
+                       ((1 - temp_alpha) * temp_reading);
+        temp_slope =
+                (temp_alpha * temp_reading) + ((1 - temp_alpha) * temp_slope);
+        boiler_temp = 2 * temp_reading - temp_slope;
+
+        if ((fabs(temp_reading - temp_slope) < 0.25)) {
+            boiler_stable = true;
+        } else {
+            boiler_stable = false;
         }
-        temp_readings[ temp_idx ] = boiler_thermo.readFahrenheit();
-        for (int i = 0; i < temp_samples; i++) {
-            float tmp = temp_readings[ i ];
-            int   j = i;
-            while (j > 0 && temp_sorted[ j - 1 ] > tmp) {
-                temp_sorted[ j ] = temp_sorted[ j - 1 ];
-                j--;
-            }
-            temp_sorted[ j ] = tmp;
-        }
-        temp_sorted[ 0 ] = 0;
-        for (int i = 1; i < temp_samples - 1; i++) {
-            temp_sorted[ 0 ] += temp_sorted[ i ];
-        }
-        boiler_temp = temp_sorted[ 0 ] / (temp_samples - 2);
 
         // Sleep
         vTaskDelay(pdMS_TO_TICKS(SENSOR_READ_TIME));
@@ -230,7 +249,13 @@ display(void *parameter) {
         sprite.fillSprite(0);
 
         // Temp
-        sprite.setTextColor(5, 0);
+        if (boiler_stable) {
+            // Green
+            sprite.setTextColor(5, 0);
+        } else {
+            // Red
+            sprite.setTextColor(2, 0);
+        }
         sprite.setFreeFont(&FreeMonoBold24pt7b);
         snprintf(buf, 128, "%.0f F",
                 current_state == MACHINE_STEAMING
@@ -240,6 +265,7 @@ display(void *parameter) {
         sprite.drawString(buf, width / 4, pos_y, 1);
 
         sprite.setFreeFont(&FreeMono9pt7b);
+        sprite.setTextColor(5, 0);
         snprintf(buf, buf_size, "%.1f F",
                 current_state == MACHINE_STEAMING
                         ? setpoint_steam
@@ -280,6 +306,22 @@ display(void *parameter) {
                     &reset_timer);
         }
 
+        // Debugging
+        if (debug) {
+            pos_y += sprite.fontHeight(1) * 2;
+            snprintf(buf, 128, "p: %.2f", boiler_pid.GetKp());
+            sprite.drawString(buf, width / 2, pos_y, 1);
+            pos_y += sprite.fontHeight(1);
+            snprintf(buf, 128, "i: %.2f", boiler_pid.GetKi());
+            sprite.drawString(buf, width / 2, pos_y, 1);
+            pos_y += sprite.fontHeight(1);
+            snprintf(buf, 128, "d: %.2f", boiler_pid.GetKd());
+            sprite.drawString(buf, width / 2, pos_y, 1);
+            pos_y += sprite.fontHeight(1);
+            snprintf(buf, 128, "raw temp: %.2f", boiler_temp_raw);
+            sprite.drawString(buf, width / 2, pos_y, 1);
+        }
+
         // Handle button presses
         for (int i = 0; i < 3; i++) {
             key[ i ].press(touch_x, touch_y, pressed);
@@ -316,7 +358,7 @@ setup() {
 
     preferences.begin("esp32resso");
     setpoint_brew = pref_or_def("setpoint_brew", 214.5);
-    setpoint_steam = pref_or_def("setpoint_steam", 285.0);
+    setpoint_steam = pref_or_def("setpoint_steam", 300.0);
 
     xTaskCreate(display, "Update Display", 4096, NULL, 1, NULL);
 
@@ -339,6 +381,13 @@ setup() {
         request->send(200, "text/plain", "ESPress0x20");
     });
 
+    webserver.on("/autotune", HTTP_GET, [](AsyncWebServerRequest *request) {
+        autotuned = false;
+        debug = true;
+        pid_tuner.reset();
+        request->send(200, "text/plain", "OK");
+    });
+
     webserver.on(
             "/clear_preferences", HTTP_GET, [](AsyncWebServerRequest *request) {
                 preferences.clear();
@@ -349,7 +398,8 @@ setup() {
     webserver.begin();
 
     boiler_pid.SetOutputLimits(0, PID_WINDOW);
-    boiler_pid.SetMode(boiler_pid.Control::automatic);
+    boiler_pid.SetMode(boiler_pid.Control::manual);
+    boiler_pid.SetTunings(PID_KP_HEAT, PID_KI_HEAT, PID_KD_HEAT);
     boiler_window = millis();
 
     pinMode(PIN_DIMMER_ZC, INPUT_PULLUP);
@@ -360,13 +410,9 @@ setup() {
 
 void
 loop() {
-    const int    cycle_samples = 5;
-    static float cycle_total = 0.0;
-    static float cycle_data[ cycle_samples ] = {};
-    static int   cycle_idx = 0;
-
     unsigned long now;
     machine_state new_state;
+    float         setpoint;
 
     now = millis();
 
@@ -386,8 +432,6 @@ loop() {
         }
 
         if (new_state == MACHINE_BREWING) {
-            boiler_pid.SetMode(boiler_pid.Control::automatic);
-            boiler_pid.SetTunings(PID_KP_BREW, PID_KI_BREW, PID_KD_BREW);
             brew_start = now;
             digitalWrite(PIN_DIMMER_PSM, HIGH);
         } else {
@@ -396,10 +440,7 @@ loop() {
 
         if (new_state == MACHINE_HEATING) {
             boiler_pid.SetMode(boiler_pid.Control::automatic);
-            boiler_pid.SetTunings(PID_KP_HEAT, PID_KI_HEAT, PID_KD_HEAT);
-        }
-
-        if (new_state == MACHINE_STEAMING) {
+        } else {
             boiler_pid.SetMode(boiler_pid.Control::manual);
         }
 
@@ -407,40 +448,24 @@ loop() {
     }
 
     // Calculate duty cycle for this window
-    if (current_state == MACHINE_STEAMING) {
+    if (!autotuned) {
+        if (pid_tuner.run()) {
+            autotuned = true;
+            boiler_pid.SetTunings(
+                    pid_tuner.get_p(), pid_tuner.get_i(), pid_tuner.get_d());
+        }
+    } else if (current_state == MACHINE_HEATING) {
+        boiler_pid.Compute();
+    } else {
+        setpoint = current_state == MACHINE_STEAMING ? setpoint_steam
+                                                     : setpoint_brew;
         // 100% until we get within 2 degrees, then a linear ramp down to 0.
-        if (boiler_temp < setpoint_steam) {
-            boiler_control = (setpoint_steam - boiler_temp) * 500;
+        if (boiler_temp < setpoint) {
+            boiler_control = (setpoint - boiler_temp) * 500;
         } else {
             boiler_control = 0;
         }
-
-        if (boiler_control > 1000) {
-            boiler_control = 1000;
-        } else if (boiler_control < 0) {
-            boiler_control = 0;
-        }
-    } else {
-        boiler_pid.Compute();
     }
 
-    // E stop
-    if (boiler_temp > 300) {
-        boiler_control = 0;
-        boiler_state(false);
-    } else {
-        boiler_state(boiler_control >= now - boiler_window);
-    }
-
-    // Calculate duty cycle for display
-    if (now - boiler_window > PID_WINDOW) {
-        boiler_window += PID_WINDOW;
-        cycle_total -= cycle_data[ cycle_idx ];
-        cycle_data[ cycle_idx ] = boiler_control;
-        cycle_total += boiler_control;
-        duty_cycle = cycle_total / 10 / cycle_samples;
-        if (++cycle_idx >= cycle_samples) {
-            cycle_idx = 0;
-        }
-    }
+    boiler_pwm();
 }
