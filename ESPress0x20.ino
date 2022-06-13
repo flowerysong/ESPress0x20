@@ -5,6 +5,8 @@
 #include <AsyncElegantOTA.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <ESPLogger.h>
+#include <LittleFS.h>
 #include <Preferences.h>
 #include <QuickPID.h>
 #include <SPI.h>
@@ -44,6 +46,7 @@ AsyncWebServer webserver(80);
 TFT_eSPI    tft = TFT_eSPI();
 TFT_eSprite sprite = TFT_eSprite(&tft);
 
+ESPLogger     logger("/data.log", LittleFS);
 machine_state current_state = MACHINE_INIT;
 unsigned long last_state_change = 0;
 float         boiler_temp_raw;
@@ -150,6 +153,7 @@ read_sensors(void *parameter) {
     const float  temp_alpha = 0.1;
     static float temp_reading;
     static float temp_slope;
+    char         log_line[ 19 ]; // "NNN.NN,NNN.NN,NNNN\0"
 
     // Initial value
     temp_reading = boiler_thermo.readFahrenheit();
@@ -169,6 +173,13 @@ read_sensors(void *parameter) {
             boiler_stable = true;
         } else {
             boiler_stable = false;
+        }
+
+        // Log
+        if (current_state == MACHINE_BREWING) {
+            snprintf(log_line, 18, "%.2f,%.2f,%.0f", boiler_temp,
+                    boiler_temp_raw, boiler_control);
+            logger.append(log_line, true);
         }
 
         // Sleep
@@ -360,6 +371,11 @@ setup() {
     setpoint_brew = pref_or_def("setpoint_brew", 214.5);
     setpoint_steam = pref_or_def("setpoint_steam", 300.0);
 
+    LittleFS.begin(true); // automatically reformat FS on mount error
+
+    logger.setSizeLimit(524288, true);
+    logger.begin();
+
     xTaskCreate(display, "Update Display", 4096, NULL, 1, NULL);
 
     Serial.print("Attempting to connect to wifi...");
@@ -394,6 +410,10 @@ setup() {
                 request->send(200, "text/plain", "OK");
             });
 
+    webserver.on("/log", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(LittleFS, "/data.log", "text/plain");
+    });
+
     AsyncElegantOTA.begin(&webserver);
     webserver.begin();
 
@@ -405,7 +425,7 @@ setup() {
     pinMode(PIN_DIMMER_ZC, INPUT_PULLUP);
     pinMode(PIN_DIMMER_PSM, OUTPUT);
 
-    xTaskCreate(read_sensors, "Read Sensors", 2048, NULL, 2, NULL);
+    xTaskCreate(read_sensors, "Read Sensors", 4096, NULL, 2, NULL);
 }
 
 void
@@ -434,6 +454,7 @@ loop() {
         if (new_state == MACHINE_BREWING) {
             brew_start = now;
             digitalWrite(PIN_DIMMER_PSM, HIGH);
+            logger.reset();
         } else {
             digitalWrite(PIN_DIMMER_PSM, LOW);
         }
@@ -462,6 +483,9 @@ loop() {
         // 100% until we get within 2 degrees, then a linear ramp down to 0.
         if (boiler_temp < setpoint) {
             boiler_control = (setpoint - boiler_temp) * 500;
+            if (boiler_control > 1000) {
+                boiler_control = 1000;
+            }
         } else {
             boiler_control = 0;
         }
