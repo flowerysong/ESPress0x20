@@ -45,6 +45,7 @@ AsyncWebServer webserver(80);
 
 TFT_eSPI    tft = TFT_eSPI();
 TFT_eSprite sprite = TFT_eSprite(&tft);
+TFT_eSprite g_sprite = TFT_eSprite(&tft);
 
 ESPLogger     logger("/data.log", LittleFS);
 machine_state current_state = MACHINE_INIT;
@@ -198,6 +199,7 @@ display(void *parameter) {
     uint16_t     touch_x = 0;
     uint16_t     touch_y = 0;
     SpriteButton key[ 3 ];
+    int          g_y_old = 0;
 
     tft.init();
 
@@ -219,6 +221,8 @@ display(void *parameter) {
 
     sprite.setColorDepth(4);
     sprite.createSprite(320, 480);
+    g_sprite.setColorDepth(4);
+    g_sprite.createSprite(300, 150);
     tft.fillScreen(TFT_BLACK);
 
     // Draw splash screen
@@ -251,6 +255,7 @@ display(void *parameter) {
     // Real display loop
     for (;;) {
         int           pos_y = 32;
+        int           g_y;
         int16_t       used;
         unsigned long brew_timer;
 
@@ -268,7 +273,7 @@ display(void *parameter) {
             sprite.setTextColor(2, 0);
         }
         sprite.setFreeFont(&FreeMonoBold24pt7b);
-        snprintf(buf, 128, "%.0f F",
+        snprintf(buf, buf_size, "%.0f F",
                 current_state == MACHINE_STEAMING
                         ? boiler_temp
                         : (boiler_temp - brew_offset));
@@ -306,7 +311,7 @@ display(void *parameter) {
             brew_timer = brew_end - brew_start;
         }
         sprite.setTextDatum(TC_DATUM);
-        snprintf(buf, 128, "%02d:%02d.%02d", brew_timer / 60000,
+        snprintf(buf, buf_size, "%02d:%02d.%02d", brew_timer / 60000,
                 brew_timer % 60000 / 1000, brew_timer % 1000 / 10);
         sprite.drawString(buf, width / 2, pos_y, 1);
         pos_y += sprite.fontHeight(1);
@@ -320,17 +325,26 @@ display(void *parameter) {
         // Debugging
         if (debug) {
             pos_y += sprite.fontHeight(1) * 2;
-            snprintf(buf, 128, "p: %.2f", boiler_pid.GetKp());
+            snprintf(buf, buf_size, "p: %.2f", boiler_pid.GetKp());
             sprite.drawString(buf, width / 2, pos_y, 1);
             pos_y += sprite.fontHeight(1);
-            snprintf(buf, 128, "i: %.2f", boiler_pid.GetKi());
+            snprintf(buf, buf_size, "i: %.2f", boiler_pid.GetKi());
             sprite.drawString(buf, width / 2, pos_y, 1);
             pos_y += sprite.fontHeight(1);
-            snprintf(buf, 128, "d: %.2f", boiler_pid.GetKd());
+            snprintf(buf, buf_size, "d: %.2f", boiler_pid.GetKd());
             sprite.drawString(buf, width / 2, pos_y, 1);
             pos_y += sprite.fontHeight(1);
-            snprintf(buf, 128, "raw temp: %.2f", boiler_temp_raw);
+            snprintf(buf, buf_size, "raw temp: %.2f", boiler_temp_raw);
             sprite.drawString(buf, width / 2, pos_y, 1);
+        } else {
+            pos_y += sprite.fontHeight(1) * 2;
+            g_sprite.scroll(-10, 0);
+            g_y = g_sprite.height() - ((g_sprite.height() / 300) * boiler_temp);
+            g_sprite.drawLine(290, g_y_old, 300, g_y, 2);
+            g_sprite.drawLine(290, g_y_old + 1, 300, g_y + 1, 2);
+            g_y_old = g_y;
+            g_sprite.pushToSprite(&sprite, 10, pos_y);
+            sprite.drawRect(10, pos_y, 310, pos_y + g_sprite.height(), 1);
         }
 
         // Handle button presses
@@ -342,7 +356,7 @@ display(void *parameter) {
         // Status line
         sprite.setTextColor(5, 0);
         sprite.setFreeFont(&FreeSans9pt7b);
-        snprintf(buf, 128, "boiler %d%% (%s)", duty_cycle,
+        snprintf(buf, buf_size, "boiler %d%% (%s)", duty_cycle,
                 current_state == MACHINE_STEAMING
                         ? "steam"
                         : (current_state == MACHINE_BREWING ? "brew" : "heat"));
