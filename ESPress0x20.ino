@@ -178,7 +178,7 @@ read_sensors(void *parameter) {
 
         // Log
         if (current_state == MACHINE_BREWING) {
-            snprintf(log_line, 18, "%.2f,%.2f,%.0f", boiler_temp,
+            snprintf(log_line, 19, "%.2f,%.2f,%.0f", boiler_temp,
                     boiler_temp_raw, boiler_control);
             logger.append(log_line, true);
         }
@@ -338,13 +338,16 @@ display(void *parameter) {
             sprite.drawString(buf, width / 2, pos_y, 1);
         } else {
             pos_y += sprite.fontHeight(1) * 2;
-            g_sprite.scroll(-10, 0);
-            g_y = g_sprite.height() - ((g_sprite.height() / 300) * boiler_temp);
-            g_sprite.drawLine(290, g_y_old, 300, g_y, 2);
-            g_sprite.drawLine(290, g_y_old + 1, 300, g_y + 1, 2);
+            g_sprite.scroll(-5, 0);
+            g_y = g_sprite.height() -
+                  ((g_sprite.height() / 200.0) * (boiler_temp - 150));
+            g_sprite.drawLine(
+                    g_sprite.width() - 5, g_y_old, g_sprite.width(), g_y, 2);
+            g_sprite.drawLine(g_sprite.width() - 5, g_y_old + 1,
+                    g_sprite.width(), g_y + 1, 2);
             g_y_old = g_y;
             g_sprite.pushToSprite(&sprite, 10, pos_y);
-            sprite.drawRect(10, pos_y, 310, pos_y + g_sprite.height(), 1);
+            sprite.drawRect(10, pos_y, g_sprite.width(), g_sprite.height(), 1);
         }
 
         // Handle button presses
@@ -511,8 +514,8 @@ loop() {
         setpoint = current_state == MACHINE_STEAMING ? setpoint_steam
                                                      : setpoint_brew;
         // 100% until we get within 2 degrees, then a linear ramp down to 0.
-        if (boiler_temp < setpoint) {
-            boiler_control = (setpoint - boiler_temp) * 500;
+        if (boiler_temp_raw < setpoint) {
+            boiler_control = (setpoint - boiler_temp_raw) * 500;
             if (boiler_control > 1000) {
                 boiler_control = 1000;
             }
