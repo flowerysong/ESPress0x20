@@ -428,6 +428,22 @@ setup() {
         request->send(LittleFS, "/data.log", "text/plain");
     });
 
+    webserver.on("/metrics", HTTP_GET, [](AsyncWebServerRequest *request) {
+        AsyncResponseStream *response =
+                request->beginResponseStream("text/plain");
+        response->print("# TYPE boiler_temp_raw gauge\n");
+        response->printf(
+                "boiler_temp_raw{sensor=\"0\"} %f\n\n", boiler_temp_raw);
+
+        response->print("# TYPE boiler_temp gauge\n");
+        response->printf("boiler_temp %f\n\n", boiler_temp);
+
+        response->print("# TYPE boiler_control gauge\n");
+        response->printf("boiler_control %f\n\n", boiler_control);
+
+        request->send(response);
+    });
+
     AsyncElegantOTA.begin(&webserver);
     webserver.begin();
 
