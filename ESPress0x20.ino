@@ -29,7 +29,7 @@
 #define PID_WINDOW 1000
 #define PID_KP_HEAT 2.0
 #define PID_KI_HEAT 0.1
-#define PID_KD_HEAT 2.0
+#define PID_KD_HEAT 0.1
 #define SENSOR_READ_TIME 500
 
 enum machine_state {
