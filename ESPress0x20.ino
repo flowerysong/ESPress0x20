@@ -265,7 +265,9 @@ display(void *parameter) {
         sprite.fillSprite(0);
 
         // Temp
-        if (boiler_stable) {
+        if (((current_state == MACHINE_STEAMING) &&
+                    (boiler_temp > setpoint_steam - 5)) ||
+                (fabs(boiler_temp - setpoint_brew) < 0.5)) {
             // Green
             sprite.setTextColor(5, 0);
         } else {
@@ -446,6 +448,19 @@ setup() {
 
         response->print("# TYPE last_state_change gauge\n");
         response->printf("last_state_change %d\n\n", last_state_change);
+
+        request->send(response);
+    });
+
+    webserver.on("/boiler_control", HTTP_POST, [](AsyncWebServerRequest *request) {
+        AsyncResponseStream *response =
+                request->beginResponseStream("text/plain");
+        if (!request->hasParam("value", true)) {
+            response->print("NACK\n");
+        } else {
+            boiler_control = request->getParam("value", true)->value().toInt();
+            response->print("OK\n");
+        }
 
         request->send(response);
     });
