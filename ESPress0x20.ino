@@ -444,6 +444,9 @@ setup() {
         response->print("# TYPE boiler_control gauge\n");
         response->printf("boiler_control %f\n\n", boiler_control);
 
+        response->print("# TYPE last_state_change gauge\n");
+        response->printf("last_state_change %d\n\n", last_state_change);
+
         request->send(response);
     });
 
