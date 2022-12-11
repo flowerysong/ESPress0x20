@@ -29,7 +29,7 @@
 #define PID_WINDOW 1000
 #define PID_KP_HEAT 2.0
 #define PID_KI_HEAT 0.1
-#define PID_KD_HEAT 0.1
+#define PID_KD_HEAT 1.0
 #define SENSOR_READ_TIME 500
 
 enum machine_state {
@@ -37,6 +37,7 @@ enum machine_state {
     MACHINE_HEATING,
     MACHINE_BREWING,
     MACHINE_STEAMING,
+    MACHINE_MANUAL,
 };
 
 
@@ -458,6 +459,7 @@ setup() {
         if (!request->hasParam("value", true)) {
             response->print("NACK\n");
         } else {
+            current_state = MACHINE_MANUAL;
             boiler_control = request->getParam("value", true)->value().toInt();
             response->print("OK\n");
         }
@@ -487,7 +489,9 @@ loop() {
 
     now = millis();
 
-    if (digitalRead(PIN_SWITCH_STEAM) == LOW) {
+    if (current_state == MACHINE_MANUAL) {
+        new_state = MACHINE_MANUAL;
+    } else if (digitalRead(PIN_SWITCH_STEAM) == LOW) {
         new_state = MACHINE_STEAMING;
     } else if (digitalRead(PIN_SWITCH_BREW) == LOW) {
         new_state = MACHINE_BREWING;
@@ -528,7 +532,7 @@ loop() {
         }
     } else if (current_state == MACHINE_HEATING) {
         boiler_pid.Compute();
-    } else {
+    } else if (current_state != MACHINE_MANUAL) {
         setpoint = current_state == MACHINE_STEAMING ? setpoint_steam
                                                      : setpoint_brew;
         // 100% until we get within 2 degrees, then a linear ramp down to 0.
